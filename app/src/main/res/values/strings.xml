@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">LectureAssistant</string>
-    <string name="activity_main_button_start_text">Start recording</string>
 </resources>
