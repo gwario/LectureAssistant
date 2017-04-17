@@ -1,8 +1,9 @@
-package at.ameise.lectureassistant;
+package at.ameise.lectureassistant.activity;
 
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -15,15 +16,17 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
-import android.view.LayoutInflater;
 import android.view.View;
-import android.view.ViewGroup;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.Locale;
 import java.util.Stack;
+
+import at.ameise.lectureassistant.R;
+import at.ameise.lectureassistant.content.adapter.TimelineEntryAdapter;
+import at.ameise.lectureassistant.content.database.LectureAssistantDatabaseHelper;
+import at.ameise.lectureassistant.content.database.TimelineEntryDAO;
+import at.ameise.lectureassistant.content.model.TimelineEntry;
 
 import static android.speech.RecognizerIntent.EXTRA_LANGUAGE;
 import static android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL;
@@ -42,29 +45,16 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     private static final int PERMISSION_REQUEST_RECORD_AUDIO = 123;
 
+    private LectureAssistantDatabaseHelper mDbHelper;
+    private SQLiteDatabase db;
+
     private SpeechRecognizer speechRecognizer;
     private boolean isRecognizing;
-    private boolean shouldStopRecognizing;
 
+    private boolean shouldStopRecognizing;
     private RecyclerView rvResults;
     private FloatingActionButton bStartStop;
-
-    private Stack<String> results;
-
-    private static class ResultViewHolder extends RecyclerView.ViewHolder {
-
-        private TextView textView;
-
-        public ResultViewHolder(View itemView) {
-            super(itemView);
-
-            textView = (TextView) itemView.findViewById(R.id.card_result_result);
-        }
-
-        public void setResult(String result) {
-            textView.setText(result);
-        }
-    }
+    private Stack<TimelineEntry> results;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,31 +62,19 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
         setContentView(R.layout.activity_main);
 
+        mDbHelper = new LectureAssistantDatabaseHelper(this);
+        db = mDbHelper.getWritableDatabase();
+
         rvResults = (RecyclerView) findViewById(R.id.activity_main_results);
         bStartStop = (FloatingActionButton) findViewById(R.id.activity_main_button_start_stop);
 
         results = new Stack<>();
 
         rvResults.setLayoutManager(new LinearLayoutManager(this));
-        rvResults.setAdapter(new RecyclerView.Adapter<ResultViewHolder>() {
-            @Override
-            public ResultViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        rvResults.setAdapter(new TimelineEntryAdapter(results));
 
-                LinearLayout v = (LinearLayout) LayoutInflater.from(parent.getContext()).inflate(R.layout.card_result, parent, false);
-                ResultViewHolder vh = new ResultViewHolder(v);
-                return vh;
-            }
-
-            @Override
-            public void onBindViewHolder(ResultViewHolder holder, int position) {
-                holder.setResult(results.elementAt(position));
-            }
-
-            @Override
-            public int getItemCount() {
-                return results.size();
-            }
-        });
+        results.addAll(TimelineEntryDAO.load(db));
+        rvResults.getAdapter().notifyDataSetChanged();
     }
 
     @Override
@@ -142,17 +120,15 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
             if(isRecognizing) {
 
-                speechRecognizer.stopListening();
                 shouldStopRecognizing = true;
-                isRecognizing = false;
-                //TODO bStartStop.setText(R.string.activity_main_button_start_text);
-
 
             } else {
 
                 shouldStopRecognizing = false;
+                bStartStop.setImageResource(R.drawable.ic_mic_off_black_24dp);
+                isRecognizing = true;
                 startListening();
-                //TODO bStartStop.setText(R.string.activity_main_button_stop_text);
+
             }
         }
     }
@@ -178,7 +154,6 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
      */
     private void startListening() {
 
-        isRecognizing = true;
         speechRecognizer.startListening(new Intent()
                 .setAction(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(EXTRA_LANGUAGE, Locale.getDefault())
@@ -231,7 +206,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
                 break;
             case ERROR_NO_MATCH:
                 Log.e("stt", "No recognition result matched.");
-                continueListening();
+                repeaatListeningOrCancel();
                 break;
             case ERROR_RECOGNIZER_BUSY:
                 Log.e("stt", "RecognitionService busy.");
@@ -254,17 +229,26 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         if(results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) != null
         && !results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).isEmpty()) {
 
-            Log.d("stt", "Adding result: "+results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0));
-            this.results.push(results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0));
+            String recognitionResultString = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0);
+
+            Log.d("stt", "Adding result: "+recognitionResultString);
+            TimelineEntry newEntry = new TimelineEntry();
+            newEntry.setText(recognitionResultString);
+            this.results.push(newEntry);
+            TimelineEntryDAO.insert(db, newEntry);
             rvResults.getAdapter().notifyDataSetChanged();
         }
 
+        repeaatListeningOrCancel();
+    }
+
+    private void repeaatListeningOrCancel() {
         if(shouldStopRecognizing) {
 
             Log.d("stt", "Breaking recognition loop.");
             speechRecognizer.cancel();
             isRecognizing = false;
-
+            bStartStop.setImageResource(R.drawable.ic_mic_black_24dp);
 
         } else {
 
