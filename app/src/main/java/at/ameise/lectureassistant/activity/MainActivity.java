@@ -273,11 +273,14 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        
+        mDbHelper.close();
 
         if(speechRecognizer != null) {
             speechRecognizer.destroy();
             speechRecognizer = null;
         }
+
+        super.onDestroy();
     }
 }
