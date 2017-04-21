@@ -5,6 +5,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import java.util.List;
@@ -30,7 +31,7 @@ public class TimelineEntryAdapter extends RecyclerView.Adapter<TimelineEntryAdap
     @Override
     public ResultViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
 
-        LinearLayout v = (LinearLayout) LayoutInflater.from(parent.getContext()).inflate(R.layout.card_result, parent, false);
+        RelativeLayout v = (RelativeLayout) LayoutInflater.from(parent.getContext()).inflate(R.layout.card_result, parent, false);
         ResultViewHolder vh = new ResultViewHolder(v);
         return vh;
     }
