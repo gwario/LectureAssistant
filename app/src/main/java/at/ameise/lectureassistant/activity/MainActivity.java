@@ -241,6 +241,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
             this.results.push(newEntry);
             TimelineEntryDAO.insert(db, newEntry);
             rvResults.getAdapter().notifyDataSetChanged();
+            rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
         }
 
         repeaatListeningOrCancel();
