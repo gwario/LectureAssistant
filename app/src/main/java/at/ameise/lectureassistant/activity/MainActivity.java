@@ -27,6 +27,8 @@ import at.ameise.lectureassistant.content.adapter.TimelineEntryAdapter;
 import at.ameise.lectureassistant.content.database.LectureAssistantDatabaseHelper;
 import at.ameise.lectureassistant.content.database.TimelineEntryDAO;
 import at.ameise.lectureassistant.content.model.TimelineEntry;
+import butterknife.BindView;
+import butterknife.ButterKnife;
 
 import static android.speech.RecognizerIntent.EXTRA_LANGUAGE;
 import static android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL;
@@ -52,8 +54,11 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     private boolean isRecognizing;
 
     private boolean shouldStopRecognizing;
-    private RecyclerView rvResults;
-    private FloatingActionButton bStartStop;
+
+    @BindView(R.id.activity_main_results)
+    RecyclerView rvResults;
+    @BindView(R.id.activity_main_button_start_stop)
+    FloatingActionButton bStartStop;
     private Stack<TimelineEntry> results;
 
     @Override
@@ -65,8 +70,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         mDbHelper = new LectureAssistantDatabaseHelper(this);
         db = mDbHelper.getWritableDatabase();
 
-        rvResults = (RecyclerView) findViewById(R.id.activity_main_results);
-        bStartStop = (FloatingActionButton) findViewById(R.id.activity_main_button_start_stop);
+        ButterKnife.bind(this);
 
         results = new Stack<>();
 
@@ -273,7 +277,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
     @Override
     protected void onDestroy() {
-        
+
         mDbHelper.close();
 
         if(speechRecognizer != null) {

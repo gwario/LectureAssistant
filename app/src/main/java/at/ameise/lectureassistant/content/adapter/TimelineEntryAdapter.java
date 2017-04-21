@@ -11,6 +11,8 @@ import java.util.List;
 
 import at.ameise.lectureassistant.R;
 import at.ameise.lectureassistant.content.model.TimelineEntry;
+import butterknife.BindView;
+import butterknife.ButterKnife;
 
 /**
  * {@link android.support.v7.widget.RecyclerView.Adapter} for {@link at.ameise.lectureassistant.content.model.TimelineEntry}s.
@@ -43,14 +45,14 @@ public class TimelineEntryAdapter extends RecyclerView.Adapter<TimelineEntryAdap
         return data.size();
     }
 
-    public static class ResultViewHolder extends RecyclerView.ViewHolder {
+    static class ResultViewHolder extends RecyclerView.ViewHolder {
 
-        private TextView textView;
+        @BindView(R.id.card_result_result)
+        TextView textView;
 
         public ResultViewHolder(View itemView) {
             super(itemView);
-
-            textView = (TextView) itemView.findViewById(R.id.card_result_result);
+            ButterKnife.bind(this, itemView);
         }
 
         public void setResult(TimelineEntry result) {
