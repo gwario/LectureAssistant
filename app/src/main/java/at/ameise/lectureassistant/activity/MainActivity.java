@@ -1,13 +1,9 @@
 package at.ameise.lectureassistant.activity;
 
 import android.Manifest;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
@@ -19,7 +15,13 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
-import java.util.Locale;
+import com.microsoft.cognitiveservices.speechrecognition.ISpeechRecognitionServerEvents;
+import com.microsoft.cognitiveservices.speechrecognition.MicrophoneRecognitionClient;
+import com.microsoft.cognitiveservices.speechrecognition.RecognitionResult;
+import com.microsoft.cognitiveservices.speechrecognition.RecognitionStatus;
+import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionMode;
+import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionServiceFactory;
+
 import java.util.Stack;
 
 import at.ameise.lectureassistant.R;
@@ -30,30 +32,16 @@ import at.ameise.lectureassistant.content.model.TimelineEntry;
 import butterknife.BindView;
 import butterknife.ButterKnife;
 
-import static android.speech.RecognizerIntent.EXTRA_LANGUAGE;
-import static android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL;
-import static android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM;
-import static android.speech.SpeechRecognizer.ERROR_AUDIO;
-import static android.speech.SpeechRecognizer.ERROR_CLIENT;
-import static android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS;
-import static android.speech.SpeechRecognizer.ERROR_NETWORK;
-import static android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT;
-import static android.speech.SpeechRecognizer.ERROR_NO_MATCH;
-import static android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY;
-import static android.speech.SpeechRecognizer.ERROR_SERVER;
-import static android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
-
-public class MainActivity extends AppCompatActivity implements RecognitionListener {
+public class MainActivity extends AppCompatActivity implements ISpeechRecognitionServerEvents {
 
     private static final int PERMISSION_REQUEST_RECORD_AUDIO = 123;
+
+    MicrophoneRecognitionClient micClient = null;
 
     private LectureAssistantDatabaseHelper mDbHelper;
     private SQLiteDatabase db;
 
-    private SpeechRecognizer speechRecognizer;
     private boolean isRecognizing;
-
-    private boolean shouldStopRecognizing;
 
     @BindView(R.id.activity_main_results)
     RecyclerView rvResults;
@@ -64,7 +52,7 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
+        Log.wtf("wtf", "wtf");
         setContentView(R.layout.activity_main);
 
         mDbHelper = new LectureAssistantDatabaseHelper(this);
@@ -79,28 +67,23 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
         results.addAll(TimelineEntryDAO.load(db));
         rvResults.getAdapter().notifyDataSetChanged();
-    }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
+        if(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
 
-        if(SpeechRecognizer.isRecognitionAvailable(this)) {
+            // Should we show an explanation?
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
 
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-            speechRecognizer.setRecognitionListener(this);
+                // Show an explanation to the user *asynchronously* -- don't block
+                // this thread waiting for the user's response! After the user
+                // sees the explanation, try again to request the permission.
+                //TODO
 
-        } else {
+            } else {
 
-            Toast.makeText(this, "Speech to text is not available on your system!", Toast.LENGTH_SHORT).show();
+                // No explanation needed, we can request the permission.
+                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST_RECORD_AUDIO);
+            }
         }
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-
-        speechRecognizer.stopListening();
     }
 
     public void onClickStartStop(View v) {
@@ -124,15 +107,29 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
 
             if(isRecognizing) {
 
-                shouldStopRecognizing = true;
+                if (null != micClient) {
+                    micClient.endMicAndRecognition();
+                }
+                bStartStop.setImageResource(R.drawable.ic_mic_black_24dp);
+                isRecognizing = false;
 
             } else {
 
-                shouldStopRecognizing = false;
                 bStartStop.setImageResource(R.drawable.ic_mic_off_black_24dp);
-                isRecognizing = true;
-                startListening();
 
+                if (this.micClient == null) {
+
+                    this.micClient = SpeechRecognitionServiceFactory.createMicrophoneClient(
+                            this,
+                            SpeechRecognitionMode.LongDictation,
+                            "en-us",
+                            this,
+                            getString(R.string.primary_key));
+                }
+
+                micClient.startMicAndRecognition();
+
+                isRecognizing = true;
             }
         }
     }
@@ -153,139 +150,55 @@ public class MainActivity extends AppCompatActivity implements RecognitionListen
         }
     }
 
-    /**
-     * Start recognizer...
-     */
-    private void startListening() {
-
-        speechRecognizer.startListening(new Intent()
-                .setAction(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(EXTRA_LANGUAGE, Locale.getDefault())
-                .putExtra(EXTRA_LANGUAGE_MODEL, LANGUAGE_MODEL_FREE_FORM));
+    @Override
+    public void onPartialResponseReceived(final String response) {
+        Log.d("stt","onPartialResponseReceived: response="+response);
     }
 
     @Override
-    public void onReadyForSpeech(Bundle params) {
-        Log.d("stt","onReadyForSpeech");
-    }
+    public void onFinalResponseReceived(RecognitionResult recognitionResult) {
+        Log.d("stt","onFinalResponseReceived");
 
-    @Override
-    public void onBeginningOfSpeech() {
-        Log.d("stt","onBeginningOfSpeech");
-    }
+        Log.d("stt", "RecognitionStatus="+recognitionResult.RecognitionStatus.name());
 
-    @Override
-    public void onRmsChanged(float rmsdB) {
-        //Log.d("stt","onRmsChanged");
-    }
+        if (recognitionResult.RecognitionStatus != RecognitionStatus.EndOfDictation) {
+            Log.d("stt", "RecognitionStatus: "+recognitionResult.RecognitionStatus.getValue());
+            Log.d("stt", "Results: ");
+            for (int i = 0; i < recognitionResult.Results.length; i++) {
+                Log.d("stt", "[" + i + "]" + " Confidence=" + recognitionResult.Results[i].Confidence + " Text=\"" + recognitionResult.Results[i].DisplayText + "\"");
+            }
 
-    @Override
-    public void onBufferReceived(byte[] buffer) {
-        Log.d("stt","onBufferReceived");
-    }
+            if(recognitionResult.RecognitionStatus == RecognitionStatus.RecognitionSuccess) {
 
-    @Override
-    public void onEndOfSpeech() {
-        Log.d("stt","onEndOfSpeech");
-    }
-
-    @Override
-    public void onError(int error) {
-        Log.d("stt","onError");
-        switch (error) {
-            case ERROR_AUDIO:
-                Log.e("stt", "Audio recording error.");
-                break;
-            case ERROR_CLIENT:
-                Log.e("stt", "Other client side errors.");
-                break;
-            case ERROR_INSUFFICIENT_PERMISSIONS:
-                Log.e("stt", "Insufficient permissions.");
-                break;
-            case ERROR_NETWORK:
-                Log.e("stt", "Other network related errors.");
-                break;
-            case ERROR_NETWORK_TIMEOUT:
-                Log.e("stt", "Network operation timed out.");
-                break;
-            case ERROR_NO_MATCH:
-                Log.e("stt", "No recognition result matched.");
-                repeaatListeningOrCancel();
-                break;
-            case ERROR_RECOGNIZER_BUSY:
-                Log.e("stt", "RecognitionService busy.");
-                break;
-            case ERROR_SERVER:
-                Log.e("stt", "Server sends error status.");
-                break;
-            case ERROR_SPEECH_TIMEOUT:
-                Log.e("stt", "No speech input.");
-                break;
-            default:
-                Log.e("stt", "Undefined error code.");
+                TimelineEntry newEntry = new TimelineEntry();
+                newEntry.setText(recognitionResult.Results[0].DisplayText);
+                this.results.push(newEntry);
+                TimelineEntryDAO.insert(db, newEntry);
+                rvResults.getAdapter().notifyDataSetChanged();
+                rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
+            }
         }
     }
 
     @Override
-    public void onResults(Bundle results) {
-        Log.d("stt","onResults");
-
-        if(results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) != null
-        && !results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).isEmpty()) {
-
-            String recognitionResultString = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0);
-
-            Log.d("stt", "Adding result: "+recognitionResultString);
-            TimelineEntry newEntry = new TimelineEntry();
-            newEntry.setText(recognitionResultString);
-            this.results.push(newEntry);
-            TimelineEntryDAO.insert(db, newEntry);
-            rvResults.getAdapter().notifyDataSetChanged();
-            rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
-        }
-
-        repeaatListeningOrCancel();
+    public void onIntentReceived(String payload) {
+        Log.d("stt","onIntentReceived: payload="+payload);
     }
 
-    private void repeaatListeningOrCancel() {
-        if(shouldStopRecognizing) {
+    @Override
+    public void onError(final int errorCode, final String response) {
+        Log.e("stt","onError: errorCode="+errorCode+", response="+response);
+    }
 
-            Log.d("stt", "Breaking recognition loop.");
-            speechRecognizer.cancel();
+    @Override
+    public void onAudioEvent(boolean recording) {
+        Log.d("stt","onAudioEvent: recording="+recording);
+
+        if (!recording) {
+            if (null != micClient) {
+                micClient.endMicAndRecognition();
+            }
             isRecognizing = false;
-            bStartStop.setImageResource(R.drawable.ic_mic_black_24dp);
-
-        } else {
-
-            continueListening();
         }
-    }
-
-    private void continueListening() {
-        Log.v("stt", "Locale.getDefault():"+ Locale.getDefault());
-        startListening();
-    }
-
-    @Override
-    public void onPartialResults(Bundle partialResults) {
-        Log.d("stt","onPartialResults");
-    }
-
-    @Override
-    public void onEvent(int eventType, Bundle params) {
-        Log.d("stt","onEvent");
-    }
-
-    @Override
-    protected void onDestroy() {
-
-        mDbHelper.close();
-
-        if(speechRecognizer != null) {
-            speechRecognizer.destroy();
-            speechRecognizer = null;
-        }
-
-        super.onDestroy();
     }
 }
