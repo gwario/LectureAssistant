@@ -3,6 +3,9 @@ package at.ameise.lectureassistant.activity;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.database.sqlite.SQLiteDatabase;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
@@ -15,10 +18,11 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
+import com.microsoft.cognitiveservices.speechrecognition.DataRecognitionClient;
 import com.microsoft.cognitiveservices.speechrecognition.ISpeechRecognitionServerEvents;
-import com.microsoft.cognitiveservices.speechrecognition.MicrophoneRecognitionClient;
 import com.microsoft.cognitiveservices.speechrecognition.RecognitionResult;
 import com.microsoft.cognitiveservices.speechrecognition.RecognitionStatus;
+import com.microsoft.cognitiveservices.speechrecognition.SpeechAudioFormat;
 import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionMode;
 import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionServiceFactory;
 
@@ -36,18 +40,23 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
 
     private static final int PERMISSION_REQUEST_RECORD_AUDIO = 123;
 
-    MicrophoneRecognitionClient micClient = null;
+    //MicrophoneRecognitionClient micClient = null;
+    private DataRecognitionClient dataRecognitionClient = null;
+    private AudioRecord mRecorder;
 
     private LectureAssistantDatabaseHelper mDbHelper;
+
     private SQLiteDatabase db;
 
-    private boolean isRecognizing;
+    private boolean isRecgrding;
 
     @BindView(R.id.activity_main_results)
     RecyclerView rvResults;
     @BindView(R.id.activity_main_button_start_stop)
     FloatingActionButton bStartStop;
+
     private Stack<TimelineEntry> results;
+    private int minBuffSize;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,6 +76,21 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
 
         results.addAll(TimelineEntryDAO.load(db));
         rvResults.getAdapter().notifyDataSetChanged();
+
+        //TODO create a microphone recording service
+
+        this.dataRecognitionClient = SpeechRecognitionServiceFactory.createDataClient(
+                this,
+                SpeechRecognitionMode.LongDictation,
+                "en-gb",
+                this,
+                getString(R.string.primary_key));
+
+        SpeechAudioFormat format = SpeechAudioFormat.create16BitPCMFormat(16000);
+        format.ChannelCount = 1;
+        dataRecognitionClient.sendAudioFormat(format);
+
+        minBuffSize = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
 
         if(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
 
@@ -103,9 +127,12 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
                 // No explanation needed, we can request the permission.
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST_RECORD_AUDIO);
             }
+
         } else {
 
+            /*
             if(isRecognizing) {
+
 
                 if (null != micClient) {
                     micClient.endMicAndRecognition();
@@ -122,7 +149,7 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
                     this.micClient = SpeechRecognitionServiceFactory.createMicrophoneClient(
                             this,
                             SpeechRecognitionMode.LongDictation,
-                            "en-us",
+                            "en-gb",
                             this,
                             getString(R.string.primary_key));
                 }
@@ -131,8 +158,52 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
 
                 isRecognizing = true;
             }
+            */
+
+            if(mRecorder.getRecordingState() == AudioRecord.RECORDSTATE_STOPPED) {
+
+                mRecorder = new AudioRecord.Builder()
+                        .setAudioSource(MediaRecorder.AudioSource.MIC)
+                        .setAudioFormat(new AudioFormat.Builder()
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setSampleRate(16000)
+                                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                                .build())
+                        .setBufferSizeInBytes(2*minBuffSize)
+                        .build();
+
+                mRecorder.startRecording();
+                isRecgrding = true;
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+
+                        byte[] bug = new byte[minBuffSize];
+
+                        while (isRecgrding) {
+
+                            int count = mRecorder.read(bug, 0, minBuffSize);
+
+                            if(count >= 0)
+                                dataRecognitionClient.sendAudio(bug, count);
+                            else
+                                Log.e("rec", "Error code: "+count);
+                        }
+                        dataRecognitionClient.endAudio();
+                        mRecorder.stop();
+                        mRecorder.release();
+                        mRecorder = null;
+                    }
+                }).start();
+
+            } else {
+
+                isRecgrding = false;
+            }
         }
     }
+
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -168,16 +239,31 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
                 Log.d("stt", "[" + i + "]" + " Confidence=" + recognitionResult.Results[i].Confidence + " Text=\"" + recognitionResult.Results[i].DisplayText + "\"");
             }
 
+            /*
             if(recognitionResult.RecognitionStatus == RecognitionStatus.RecognitionSuccess) {
+
 
                 TimelineEntry newEntry = new TimelineEntry();
                 newEntry.setText(recognitionResult.Results[0].DisplayText);
                 this.results.push(newEntry);
                 TimelineEntryDAO.insert(db, newEntry);
-                rvResults.getAdapter().notifyDataSetChanged();
-                rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        rvResults.getAdapter().notifyDataSetChanged();
+                        rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
+                    }
+                });
             }
+            */
         }
+        /*
+        if(recognitionResult.RecognitionStatus == RecognitionStatus.DictationEndSilenceTimeout
+        || recognitionResult.RecognitionStatus == RecognitionStatus.InitialSilenceTimeout) {
+            //TODO causes app crash on RecognitionStatus.DictationEndSilenceTimeout
+            micClient.startMicAndRecognition();
+        }
+        */
     }
 
     @Override
@@ -194,11 +280,13 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
     public void onAudioEvent(boolean recording) {
         Log.d("stt","onAudioEvent: recording="+recording);
 
+        /*
         if (!recording) {
             if (null != micClient) {
                 micClient.endMicAndRecognition();
             }
             isRecognizing = false;
         }
+        */
     }
 }
