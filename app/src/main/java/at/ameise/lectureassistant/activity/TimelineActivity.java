@@ -1,8 +1,9 @@
 package at.ameise.lectureassistant.activity;
 
 import android.Manifest;
+import android.arch.lifecycle.LifecycleActivity;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.pm.PackageManager;
-import android.database.sqlite.SQLiteDatabase;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -11,7 +12,6 @@ import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
@@ -26,56 +26,51 @@ import com.microsoft.cognitiveservices.speechrecognition.SpeechAudioFormat;
 import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionMode;
 import com.microsoft.cognitiveservices.speechrecognition.SpeechRecognitionServiceFactory;
 
-import java.util.Stack;
-
 import at.ameise.lectureassistant.R;
 import at.ameise.lectureassistant.content.adapter.TimelineEntryAdapter;
-import at.ameise.lectureassistant.content.database.LectureAssistantDatabaseHelper;
-import at.ameise.lectureassistant.content.database.TimelineEntryDAO;
+import at.ameise.lectureassistant.content.database.LectureAssistantDatabase;
 import at.ameise.lectureassistant.content.model.TimelineEntry;
+import at.ameise.lectureassistant.content.viewmodel.TimelineViewModel;
 import butterknife.BindView;
 import butterknife.ButterKnife;
 
-public class MainActivity extends AppCompatActivity implements ISpeechRecognitionServerEvents {
+public class TimelineActivity extends LifecycleActivity implements ISpeechRecognitionServerEvents {
 
     private static final int PERMISSION_REQUEST_RECORD_AUDIO = 123;
 
-    //MicrophoneRecognitionClient micClient = null;
     private DataRecognitionClient dataRecognitionClient = null;
     private AudioRecord mRecorder;
 
-    private LectureAssistantDatabaseHelper mDbHelper;
+    private LectureAssistantDatabase db;
 
-    private SQLiteDatabase db;
+    private TimelineViewModel model;
+    private TimelineEntryAdapter adapter;
 
     private boolean isRecgrding;
-
     @BindView(R.id.activity_main_results)
     RecyclerView rvResults;
+
     @BindView(R.id.activity_main_button_start_stop)
     FloatingActionButton bStartStop;
-
-    private Stack<TimelineEntry> results;
     private int minBuffSize;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.wtf("wtf", "wtf");
-        setContentView(R.layout.activity_main);
-
-        mDbHelper = new LectureAssistantDatabaseHelper(this);
-        db = mDbHelper.getWritableDatabase();
+        setContentView(R.layout.activity_timeline);
 
         ButterKnife.bind(this);
 
-        results = new Stack<>();
+        adapter = new TimelineEntryAdapter();
 
         rvResults.setLayoutManager(new LinearLayoutManager(this));
-        rvResults.setAdapter(new TimelineEntryAdapter(results));
+        rvResults.setAdapter(adapter);
 
-        results.addAll(TimelineEntryDAO.load(db));
-        rvResults.getAdapter().notifyDataSetChanged();
+        model = ViewModelProviders.of(this).get(TimelineViewModel.class);
+        model.getTimelineEntries(this).observe(this, timelineEntries -> {
+            adapter.setData(timelineEntries);
+        });
 
         //TODO create a microphone recording service
 
@@ -91,6 +86,10 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
         dataRecognitionClient.sendAudioFormat(format);
 
         minBuffSize = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+
+        bStartStop.setOnClickListener(v -> {
+            onClickStartStop(v);
+        });
 
         if(ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
 
@@ -130,37 +129,7 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
 
         } else {
 
-            /*
-            if(isRecognizing) {
-
-
-                if (null != micClient) {
-                    micClient.endMicAndRecognition();
-                }
-                bStartStop.setImageResource(R.drawable.ic_mic_black_24dp);
-                isRecognizing = false;
-
-            } else {
-
-                bStartStop.setImageResource(R.drawable.ic_mic_off_black_24dp);
-
-                if (this.micClient == null) {
-
-                    this.micClient = SpeechRecognitionServiceFactory.createMicrophoneClient(
-                            this,
-                            SpeechRecognitionMode.LongDictation,
-                            "en-gb",
-                            this,
-                            getString(R.string.primary_key));
-                }
-
-                micClient.startMicAndRecognition();
-
-                isRecognizing = true;
-            }
-            */
-
-            if(mRecorder.getRecordingState() == AudioRecord.RECORDSTATE_STOPPED) {
+            if(mRecorder == null || mRecorder.getRecordingState() == AudioRecord.RECORDSTATE_STOPPED) {
 
                 mRecorder = new AudioRecord.Builder()
                         .setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -175,6 +144,8 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
                 mRecorder.startRecording();
                 isRecgrding = true;
 
+                //TODO make async task
+                //improve code quality
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -233,37 +204,26 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
         Log.d("stt", "RecognitionStatus="+recognitionResult.RecognitionStatus.name());
 
         if (recognitionResult.RecognitionStatus != RecognitionStatus.EndOfDictation) {
-            Log.d("stt", "RecognitionStatus: "+recognitionResult.RecognitionStatus.getValue());
+            Log.d("stt", "RecognitionStatus: " + recognitionResult.RecognitionStatus.getValue());
             Log.d("stt", "Results: ");
             for (int i = 0; i < recognitionResult.Results.length; i++) {
                 Log.d("stt", "[" + i + "]" + " Confidence=" + recognitionResult.Results[i].Confidence + " Text=\"" + recognitionResult.Results[i].DisplayText + "\"");
             }
 
-            /*
-            if(recognitionResult.RecognitionStatus == RecognitionStatus.RecognitionSuccess) {
+            TimelineEntry newEntry = new TimelineEntry();
+            //TODO Results does not always have >0 elements so npe here
+            newEntry.setText(recognitionResult.Results[0].DisplayText);
+            model.storeTimelineEntries(this, newEntry);
 
-
-                TimelineEntry newEntry = new TimelineEntry();
-                newEntry.setText(recognitionResult.Results[0].DisplayText);
-                this.results.push(newEntry);
-                TimelineEntryDAO.insert(db, newEntry);
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        rvResults.getAdapter().notifyDataSetChanged();
-                        rvResults.smoothScrollToPosition(rvResults.getAdapter().getItemCount() - 1);
-                    }
-                });
-            }
-            */
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    rvResults.getAdapter().notifyDataSetChanged();
+                    //TODO do this after the dataset change was loaded
+                    rvResults.smoothScrollToPosition(Math.max(0, rvResults.getAdapter().getItemCount() - 1));
+                }
+            });
         }
-        /*
-        if(recognitionResult.RecognitionStatus == RecognitionStatus.DictationEndSilenceTimeout
-        || recognitionResult.RecognitionStatus == RecognitionStatus.InitialSilenceTimeout) {
-            //TODO causes app crash on RecognitionStatus.DictationEndSilenceTimeout
-            micClient.startMicAndRecognition();
-        }
-        */
     }
 
     @Override
@@ -279,14 +239,5 @@ public class MainActivity extends AppCompatActivity implements ISpeechRecognitio
     @Override
     public void onAudioEvent(boolean recording) {
         Log.d("stt","onAudioEvent: recording="+recording);
-
-        /*
-        if (!recording) {
-            if (null != micClient) {
-                micClient.endMicAndRecognition();
-            }
-            isRecognizing = false;
-        }
-        */
     }
 }

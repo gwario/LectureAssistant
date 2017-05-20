@@ -4,10 +4,10 @@ import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import at.ameise.lectureassistant.R;
@@ -24,8 +24,8 @@ public class TimelineEntryAdapter extends RecyclerView.Adapter<TimelineEntryAdap
 
     private List<TimelineEntry> data;
 
-    public TimelineEntryAdapter(List<TimelineEntry> data) {
-        this.data = data;
+    public TimelineEntryAdapter() {
+        this.data = new ArrayList<>();
     }
 
     @Override
@@ -44,6 +44,12 @@ public class TimelineEntryAdapter extends RecyclerView.Adapter<TimelineEntryAdap
     @Override
     public int getItemCount() {
         return data.size();
+    }
+
+    public void setData(List<TimelineEntry> timelineEntries) {
+        data.clear();
+        data.addAll(timelineEntries);
+        notifyDataSetChanged();
     }
 
     static class ResultViewHolder extends RecyclerView.ViewHolder {
